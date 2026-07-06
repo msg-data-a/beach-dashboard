@@ -82,6 +82,7 @@ def estimate_fly_risk(wind_speed_mph, wind_dir_deg):
 def fetch_all_beach_data():
     marine_url = f"https://open-meteo.com{LAT}&longitude={LON}&hourly=wave_height,wave_period,wave_direction&daily=sea_surface_temperature&timezone=auto&forecast_days=1"
     weather_url = f"https://open-meteo.com{LAT}&longitude={LON}&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m&timezone=auto&forecast_days=1"
+
     
     m_res = requests.get(marine_url).json()
     w_res = requests.get(weather_url).json()
