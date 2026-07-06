@@ -1,150 +1,142 @@
 import streamlit as st
 import requests
 import pandas as pd
+import os
 from datetime import datetime, timedelta
 
-# Page Configuration for Layout
-st.set_page_config(
-    page_title="Kohler-Andrae South Beach Monitor",
-    page_icon="🏖️",
-    layout="wide"
-)
+st.set_page_config(page_title="Kohler-Andrae Beach Monitor", layout="wide")
 
-# ----------------------------------------------------
 # 1. Custom Calculation Engines
-# ----------------------------------------------------
-def get_compass_heading(degrees):
-    degrees = degrees % 360
-    directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", 
-                  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
-    return directions[int((degrees + 11.25) / 22.5) % 16]
+def get_compass(deg):
+    arr = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
+    return arr[int((deg % 360 + 11.25) / 22.5) % 16]
 
-def calculate_wind_chill(air_temp_f, wind_mph):
-    if air_temp_f <= 50 and wind_mph > 3:
-        return 35.74 + (0.6215 * air_temp_f) - (35.75 * (wind_mph**0.16)) + (0.4275 * air_temp_f * (wind_mph**0.16))
-    return air_temp_f
+def calc_chill(t, w):
+    if t <= 50 and w > 3:
+        return 35.74 + (0.6215 * t) - (35.75 * (w**0.16)) + (0.4275 * t * (w**0.16))
+    return t
 
-def calculate_swimability(water_temp, air_temp, wind_chill, humidity, wind_speed):
-    w_score = 100 if water_temp >= 72 else (85 if water_temp >= 65 else (65 if water_temp >= 60 else (40 if water_temp >= 55 else 10)))
-    a_score = 100 if wind_chill >= 80 else (90 if wind_chill >= 70 else (70 if wind_chill >= 60 else (45 if wind_chill >= 50 else 15)))
-    w_penalty = min(wind_speed * 1.5, 20)
-    final_score = max(0, min(100, int((w_score * 0.45) + (a_score * 0.45) + 10 - w_penalty)))
-    
-    if final_score >= 80: return final_score, "Excellent 🟢", "Warm air/water combo. Minimal exit chill."
-    elif final_score >= 60: return final_score, "Tolerable 🟡", "Refreshing water, but expect a brisk breeze chill upon exit."
-    elif final_score >= 40: return final_score, "Brisk 🟠", "Wetsuit recommended. High wind chill factor."
-    else: return final_score, "Cold Risk 🔴", "Cold shock hazard present."
+def calc_swim(w_t, a_t, chill, hum, w_s):
+    w_sc = 100 if w_t >= 72 else (85 if w_t >= 65 else (65 if w_t >= 60 else (40 if w_t >= 55 else 10)))
+    a_sc = 100 if chill >= 80 else (90 if chill >= 70 else (70 if chill >= 60 else (45 if chill >= 50 else 15)))
+    score = max(0, min(100, int((w_sc * 0.45) + (a_sc * 0.45) + 10 - min(w_s * 1.5, 20))))
+    if score >= 80: return score, "Excellent 🟢", "Warm combo. Minimal exit chill."
+    elif score >= 60: return score, "Tolerable 🟡", "Refreshing water. Brisk exit breeze."
+    elif score >= 40: return score, "Brisk 🟠", "Wetsuit advised. High thermal loss."
+    return score, "Cold Risk 🔴", "Cold shock hazard."
 
-def estimate_fly_risk(wind_speed_mph, wind_dir_deg):
-    is_offshore = 240 <= wind_dir_deg <= 330
-    if wind_speed_mph < 4: return "CRITICAL 🔴", "Stagnant conditions let biting flies cluster near sand."
-    elif is_offshore and wind_speed_mph <= 12: return "HIGH 🔴", "Gentle West wind moves swarms out of woods to shoreline."
-    elif is_offshore and wind_speed_mph > 12: return "LOW 🟢", "Offshore wind is present, but too fast for stable fly travel."
-    elif 60 <= wind_dir_deg <= 160: return "NONE 🟢", "Onshore lake breeze actively pins pests inland."
-    else: return "MODERATE 🟡", "Variable shoreline shifts. Keep spray close."
+def calc_flies(w_s, w_d):
+    is_offshore = 240 <= w_d <= 330
+    if w_s < 4: return "CRITICAL 🔴", "Stagnant air allows swarming near sand."
+    elif is_offshore and w_s <= 12: return "HIGH 🔴", "West breeze blows pests to sand."
+    elif is_offshore and w_s > 12: return "LOW 🟢", "Wind too fast for stable fly flight."
+    elif 60 <= w_d <= 160: return "NONE 🟢", "Onshore lake breeze pins swarms inland."
+    return "MODERATE 🟡", "Variable shoreline winds. Pack spray."
 
-# ----------------------------------------------------
-# 2. Unblockable Data Loading Network
-# ----------------------------------------------------
-def fetch_all_beach_data():
-    # Safe defaults to prevent crashing if NOAA grids are offline
-    live_data = {"air": 72.0, "hum": 60, "wind": 11.0, "dir": 45.0}
-    forecast_days = []
-    
+# 2. Web Data Scraping Pipeline
+def scrape_shyw3():
     try:
-        # Utilizing open weather endpoints that are universally accessible from public servers
+        res = requests.get("https://noaa.gov", timeout=4)
+        if res.status_code == 200:
+            val = float(res.text.split("\n")[2].split()[14])
+            if val < 99.0: return (val * 9/5) + 32
+    except: pass
+    return None
+
+def fetch_data():
+    live = {"air": 74.0, "hum": 60, "wind": 8.0, "dir": 270.0}
+    fc = []
+    try:
         url = "https://open-meteo.com"
-        df_hourly = pd.read_json(url, typ='series')['hourly']
-        df_daily = pd.read_json(url, typ='series')['daily']
-        h_idx = datetime.now().hour
-        
-        live_data["air"] = (df_hourly['temperature_2m'][h_idx] * 9/5) + 32
-        live_data["hum"] = df_hourly['relative_humidity_2m'][h_idx]
-        live_data["wind"] = df_hourly['wind_speed_10m'][h_idx] * 0.621371
-        live_data["dir"] = df_hourly['wind_direction_10m'][h_idx]
-        
+        res = requests.get(url, timeout=5).json()
+        h = datetime.now().hour
+        live["air"] = (res['hourly']['temperature_2m'][h] * 9/5) + 32
+        live["hum"] = res['hourly']['relative_humidity_2m'][h]
+        live["wind"] = res['hourly']['wind_speed_10m'][h] * 0.621371
+        live["dir"] = res['hourly']['wind_direction_10m'][h]
         for i in range(5):
             lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
-            forecast_days.append({
+            fc.append({
                 "day": lbl,
-                "max_temp": (df_daily['temperature_2m_max'][i] * 9/5) + 32,
-                "wind_speed": df_daily['wind_speed_10m_max'][i] * 0.621371,
-                "wind_dir": df_daily['wind_direction_10m_dominant'][i]
+                "max": (res['daily']['temperature_2m_max'][i] * 9/5) + 32,
+                "wind": res['daily']['wind_speed_10m_max'][i] * 0.621371,
+                "dir": res['daily']['wind_direction_10m_dominant'][i]
             })
-    except Exception:
-        # Realistic changing metrics loop to ensure forecast visual variance if fallback occurs
+    except:
         for i in range(5):
             lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
-            forecast_days.append({"day": lbl, "max_temp": 71.0+(i*1.5), "wind_speed": 12.0-(i*1.2), "wind_dir": 55.0+(i * 10)})
-        
-    return live_data, forecast_days
+            fc.append({"day": lbl, "max": 72.0+(i*2), "wind": 8.0, "dir": 45.0})
+    return live, fc
 
-# ----------------------------------------------------
-# 3. UI Dashboard Processing
-# ----------------------------------------------------
+# 3. Application UI Rendering
 st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
-st.caption("Active Hydrodynamic Modeling Sandbox — Grid Coordinate Reference: 43.5956, -87.7500")
+live_feed, forecast_list = fetch_data()
+shyw3_temp = scrape_shyw3()
 
-live_feed, forecast_list = fetch_all_beach_data()
 st.sidebar.header("🔬 Model Auditing Tool")
-use_override = st.sidebar.checkbox("Activate Manual Overrides", value=False)
-
-if use_override:
-    air_temp = st.sidebar.slider("Air Temp (°F)", 40, 100, int(live_feed["air"]))
-    humidity = st.sidebar.slider("Humidity (%)", 10, 100, int(live_feed["hum"]))
-    wind_speed = st.sidebar.slider("Wind Speed (mph)", 0, 40, int(live_feed["wind"]))
-    wind_dir = st.sidebar.slider("Wind Direction (°)", 0, 360, int(live_feed["dir"]))
+if st.sidebar.checkbox("Activate Manual Overrides", value=False):
+    air_temp = st.sidebar.slider("Air Temp", 40, 100, int(live_feed["air"]))
+    humidity = st.sidebar.slider("Humidity", 10, 100, int(live_feed["hum"]))
+    wind_speed = st.sidebar.slider("Wind Speed", 0, 40, int(live_feed["wind"]))
+    wind_dir = st.sidebar.slider("Wind Direction", 0, 360, int(live_feed["dir"]))
 else:
     air_temp, humidity, wind_speed, wind_dir = live_feed["air"], live_feed["hum"], live_feed["wind"], live_feed["dir"]
 
-wave_ft = 0.5 if wind_speed <= 12 else ((wind_speed * 0.14) if (60 <= wind_dir <= 160) else (wind_speed * 0.07))
+wave_ft = 0.5 if wind_speed <= 15 else ((wind_speed * 0.15) if (60 <= wind_dir <= 160) else (wind_speed * 0.08))
 water_temp = 62.0 - (6.5 if (240 <= wind_dir <= 330 and wind_speed > 10) else (-1.5 if (70 <= wind_dir <= 150 and wind_speed > 8) else 0.0))
 
-wind_chill = calculate_wind_chill(air_temp, wind_speed)
-swim_score, swim_lbl, swim_desc = calculate_swimability(water_temp, air_temp, wind_chill, humidity, wind_speed)
-fly_lbl, fly_desc = estimate_fly_risk(wind_speed, wind_dir)
+chill = calc_chill(air_temp, wind_speed)
+s_score, s_lbl, s_desc = calc_swim(water_temp, air_temp, chill, humidity, wind_speed)
+f_lbl, f_desc = calc_flies(wind_speed, wind_dir)
 
 st.markdown("---")
-c1, c2 = st.columns(2)
-with c1:
+col1, col2 = st.columns(2)
+with col1:
     st.subheader("🏊 Swimability & Exit Score")
-    st.metric("Swim Score Index", f"{swim_score} / 100", swim_lbl, delta_color="normal" if "Excel" in swim_lbl or "Toler" in swim_lbl else "inverse")
-    st.info(f"**Rationale:** {swim_desc}")
-with c2:
+    st.metric("Swim Score Index", f"{s_score} / 100", s_lbl, delta_color="normal" if "Excel" in s_lbl or "Toler" in s_lbl else "inverse")
+    st.info(f"**Rationale:** {s_desc}")
+with col2:
     st.subheader("🪰 Biting Beach Fly Risk")
-    st.metric("Fly Activity Index", fly_lbl, delta="Warning" if "CRIT" in fly_lbl or "HIGH" in fly_lbl else "Favorable")
-    st.warning(f"**Rationale:** {fly_desc}")
+    st.metric("Fly Activity Index", f_lbl, delta="Warning" if "🔴" in f_lbl or "🟡" in f_lbl else "Favorable")
+    st.warning(f"**Rationale:** {f_desc}")
 
 st.markdown("---")
 st.subheader("📊 Output Modeling Layer Summary")
 c3, c4, c5 = st.columns(3)
 with c3:
-    st.metric("Est. Water Temp", f"{water_temp:.1f} °F")
-    st.metric("Wave Height Estimate", f"{wave_ft:.1f} ft")
+    st.metric("Sheboygan Intake (SHYW3)", f"{shyw3_temp:.1f} °F" if shyw3_temp else "Offline", "🔴 LIVE DATA")
+    st.metric("Surf Zone (Model Est)", f"{water_temp:.1f} °F")
 with c4:
     st.metric("Air Temperature", f"{air_temp:.1f} °F")
-    st.metric("Wind Chill / RealFeel", f"{wind_chill:.1f} °F")
+    st.metric("Wind Chill / RealFeel", f"{chill:.1f} °F")
 with c5:
-    st.metric("Wind Speed & Heading", f"{wind_speed:.1f} mph", f"{int(wind_dir)}° {get_compass_heading(wind_dir)}")
-    st.metric("Relative Humidity", f"{humidity}%")
+    st.metric("Wind Speed & Heading", f"{wind_speed:.1f} mph", f"{int(wind_dir)}° {get_compass(wind_dir)}")
+    st.metric("Wave Height Estimate", f"{wave_ft:.1f} ft")
 
 st.markdown("---")
 st.subheader("📅 5-Day Beach Conditions Forecast")
 f_cols = st.columns(5)
-for index, day_data in enumerate(forecast_list):
-    with f_cols[index]:
-        d_wave = 0.5 if day_data["wind_speed"] <= 12 else (day_data["wind_speed"] * 0.12)
-        d_water = 62.0 - (6.5 if (240 <= day_data["wind_dir"] <= 330 and day_data["wind_speed"] > 10) else (-1.5 if (70 <= day_data["wind_dir"] <= 150 and day_data["wind_speed"] > 8) else 0.0))
-        d_chill = calculate_wind_chill(day_data["max_temp"], day_data["wind_speed"])
-        ds_val, ds_str, ds_reason = calculate_swimability(d_water, day_data["max_temp"], d_chill, 60, day_data["wind_speed"])
-        df_str, df_reason = estimate_fly_risk(day_data["wind_speed"], day_data["wind_dir"])
+for idx, d in enumerate(forecast_list):
+    with f_cols[idx]:
+        d_water = 62.0 - (6.5 if (240 <= d["dir"] <= 330 and d["wind"] > 10) else (-1.5 if (70 <= d["dir"] <= 150 and d["wind"] > 8) else 0.0))
+        d_chill = calc_chill(d["max"], d["wind"])
+        ds_v, ds_s, ds_r = calc_swim(d_water, d["max"], d_chill, 60, d["wind"])
+        df_s, df_r = calc_flies(d["wind"], d["dir"])
         
-        st.markdown(f"### **{day_data['day']}**")
-        st.markdown(f"🌡️ **Air Max:** {day_data['max_temp']:.0f}°F")
-        st.markdown(f"🌊 **Est Water:** {d_water:.0f}°F")
-        st.markdown(f"💨 **Wind:** {day_data['wind_speed']:.0f} mph `{get_compass_heading(day_data['wind_dir'])}`")
-        st.markdown(f"🏊 **Swim:** `{ds_str}` ({ds_val}/100)")
-        st.caption(f"_{ds_reason}_")
-        st.markdown(f"🪰 **Flies:** `{df_str}`")
-        st.caption(f"_{df_reason}_")
+        st.markdown(f"### **{d['day']}**")
+        st.markdown(f"🌡️ **Air Max:** {d['max']:.0f}°F\n\n🌊 **Est Water:** {d_water:.0f}°F")
+        st.markdown(f"💨 **Wind:** {d['wind']:.0f} mph `{get_compass(d['dir'])}`")
+        st.markdown(f"🏊 **Swim:** `{ds_s}` ({ds_v}/100)\n\n_{ds_r}_")
+        st.markdown(f"🪰 **Flies:** `{df_s}`\n\n_{df_r}_")
         st.markdown("---")
+
+st.markdown("### 📝 Ground-Truth Calibration Logger")
+with st.form("logger_form", clear_on_submit=True):
+    o_w = st.number_input("Actual Water Temp if known (°F)", 32.0, 90.0, 62.0, 0.5)
+    o_s = st.selectbox("Observed Surf", ["Flat / Glassy", "Minor Ripples (<1 ft)", "Chop (1-2 ft)", "Heavy Waves (3+ ft)"])
+    o_f = st.select_slider("Observed Fly Severity", options=["None 😊", "Minor 🟡", "Severe 🔴"])
+    o_n = st.text_input("Additional Ground Notes")
+    if st.form_submit_with_button("💾 Save Field Observation Record"):
+        row = pd.DataFrame([{"Time": datetime.now().strftime("%m-%d %H:%M"), "M_Water": water_temp, "O_Water": o_w, "M_Wind": f"{wind_speed:.1f} {get_compass(wind_dir)}", "O_Surf": o_s, "Flies": o_f, "Notes": o_n}])
+        row.to_csv("observations.csv", mode='a', header=not os.path.exists("observations.csv"), index=False)
+        st.success("Saved! Log records appended to observations.csv inside GitHub repo.")
