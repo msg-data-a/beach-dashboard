@@ -35,26 +35,20 @@ def calc_flies(w_s, w_d):
     return "MODERATE 🟡", "Variable shoreline winds. Pack spray."
 
 def clean_wind_speed(wind_str):
-    """Safely extracts a numeric integer from NWS wind strings like '10 mph' or '5 to 15 mph'"""
     numbers = [int(s) for s in re.findall(r'\d+', str(wind_str))]
     return float(max(numbers)) if numbers else 8.0
 
 def get_nws_direction_degrees(direction_str):
-    """Translates NWS text headings (e.g. 'ENE') to degrees if degrees are omitted"""
     mapping = {"N":0,"NNE":22,"NE":45,"ENE":67,"E":90,"ESE":112,"SE":135,"SSE":157,
                "S":180,"SSW":202,"SW":225,"WSW":247,"W":270,"WNW":292,"NW":315,"NNW":337}
     return float(mapping.get(str(direction_str).upper(), 70.0))
 
-# 2. Authoritative National Weather Service Fetching Pipeline
+# 2. Resilient National Weather Service Data Engine
 def fetch_data():
     live = {"air": 72.0, "hum": 60, "wind": 7.0, "dir": 45.0}
     fc = []
-    
     try:
-        # Utilizing explicit custom header signatures to authenticate cleanly with Weather.gov
         headers = {"User-Agent": "KohlerAndraeBeachMonitorApp/2.0 (contact: test@dashboard.com)"}
-        
-        # 1. Fetch Current Live Hourly Grid Data
         h_res = requests.get("https://weather.gov", headers=headers, timeout=6).json()
         curr = h_res["properties"]["periods"][0]
         
@@ -63,30 +57,23 @@ def fetch_data():
         live["wind"] = clean_wind_speed(curr["windSpeed"])
         live["dir"] = get_nws_direction_degrees(curr["windDirection"])
         
-        # 2. Fetch Daily Forecast Matrix Grid
         d_res = requests.get("https://weather.gov", headers=headers, timeout=6).json()
         periods = d_res["properties"]["periods"]
-        
         day_count = 0
         for p in periods:
             if p["isDaytime"] and day_count < 5:
                 fc.append({
-                    "day": p["name"],
-                    "max": float(p["temperature"]),
-                    "wind": clean_wind_speed(p["windSpeed"]),
-                    "dir": get_nws_direction_degrees(p["windDirection"])
+                    "day": p["name"], "max": float(p["temperature"]),
+                    "wind": clean_wind_speed(p["windSpeed"]), "dir": get_nws_direction_degrees(p["windDirection"])
                 })
                 day_count += 1
-                
-    except Exception as e:
-        # Unique shifting values so you instantly know if it falls back
+    except:
         for i in range(5):
             lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
-            fc.append({"day": lbl, "max": 68.0+(i*3), "wind": 5.0+(i*2), "dir": 90.0})
-            
+            fc.append({"day": lbl, "max": 68.0+(i*3), "wind": 6.0, "dir": 45.0})
     return live, fc
 
-# 3. Application UI Rendering
+# 3. UI Application Dashboard Processing
 st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
 live_feed, forecast_list = fetch_data()
 
@@ -147,7 +134,22 @@ for idx, d in enumerate(forecast_list):
         st.markdown(f"🪰 **Flies:** `{df_s}`\n\n_{df_r}_")
         st.markdown("---")
 
+# 4. Data Extraction & Ground Truth Logging Management
 st.markdown("### 📝 Ground-Truth Calibration Logger")
+
+# Dynamic File Extraction Button UI Layer
+log_filename = "observations.csv"
+if os.path.exists(log_filename):
+    df_logs = pd.read_csv(log_filename)
+    st.download_button(
+        label="📥 Download Consolidated Performance Logs (.CSV)",
+        data=df_logs.to_csv(index=False),
+        file_name="beach_model_validation_log.csv",
+        mime="text/csv"
+    )
+else:
+    st.caption("ℹ️ No historical observation data logged onto this container instance yet.")
+
 logger_form = st.form("logger_form", clear_on_submit=True)
 o_w = logger_form.number_input("Actual Water Temp if known (°F)", 32.0, 90.0, 62.0, 0.5)
 o_s = logger_form.selectbox("Observed Surf", ["Flat / Glassy", "Minor Ripples (<1 ft)", "Chop (1-2 ft)", "Heavy Waves (3+ ft)"])
@@ -157,5 +159,5 @@ submit_button = logger_form.form_submit_button("💾 Save Field Observation Reco
 
 if submit_button:
     row = pd.DataFrame([{"Time": datetime.now().strftime("%m-%d %H:%M"), "M_Water": water_temp, "O_Water": o_w, "M_Wind": f"{wind_speed:.1f} {get_compass(wind_dir)}", "O_Surf": o_s, "Flies": o_f, "Notes": o_n}])
-    row.to_csv("observations.csv", mode='a', header=not os.path.exists("observations.csv"), index=False)
-    st.success("Saved! Log records appended to observations.csv inside GitHub repo.")
+    row.to_csv(log_filename, mode='a', header=not os.path.exists(log_filename), index=False)
+    st.success("Saved! Log record appended to current server container storage instance. Refresh page to update download button matrix link.")
