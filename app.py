@@ -35,21 +35,16 @@ with col2:
     """)
 
 st.markdown("---")
-st.subheader("📊 Live Hydrodynamic, Wave & Weather Station Map")
-st.info("💡 **Interactive Panel Instructions:** Use the widget below to view live sea surface temperatures, precise hourly wind vectors, wave heights, and upwelling shifts directly over our target coordinates.")
+st.subheader("🛰️ Live Great Lakes Hydrodynamic Tracking Model")
+st.info("💡 **Dashboard Summary:** This panel tracks active regional marine thermal data. West/Northwest winds indicate upwelling (colder water), while East/Southeast winds represent downwelling pockets (warmer water).")
 
-# Embed the responsive meteorological panel. It renders client-side on your screen, completely avoiding API server blocks.
-embed_html = f"""
-<div style="width: 100%; height: 700px; overflow: hidden; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-    <iframe 
-        src="https://windy.com{LAT}&lon={LON}"
-        width="100%" 
-        height="100%" 
-        frameborder="0"
-        style="border: none;">
-    </iframe>
-</div>
-"""
+# Direct NOAA Great Lakes CoastWatch satellite surface thermal map URL
+noaa_image_url = "https://noaa.gov"
 
-# Inject into the Streamlit Web Application
-st.components.v1.html(embed_html, height=720)
+# Display the real-time thermal/wave gradient image directly on screen
+st.image(
+    noaa_image_url, 
+    caption="Official NOAA Lake Michigan Sea Surface Temperature (SST) & Heat Gradient Grid Loop", 
+    use_container_width=True
+)
+
