@@ -33,14 +33,22 @@ def calc_flies(w_s, w_d):
     elif 60 <= w_d <= 160: return "NONE 🟢", "Onshore lake breeze pins swarms inland."
     return "MODERATE 🟡", "Variable shoreline winds. Pack spray."
 
-# 2. Web Data Scraping Pipeline
+# 2. Sandboxed Web Data Scraping Pipeline
 def scrape_shyw3():
+    """Isolated scraper that extracts WTMP safely from the 3rd row of the NDBC matrix."""
     try:
         res = requests.get("https://noaa.gov", timeout=4)
         if res.status_code == 200:
-            val = float(res.text.split("\n")[2].split()[14])
-            if val < 99.0: return (val * 9/5) + 32
-    except: pass
+            lines = res.text.split("\n")
+            if len(lines) > 2:
+                # Target row 2 explicitly to pull words cleanly into indices
+                target_data = lines[2].split()
+                if len(target_data) > 14:
+                    val = float(target_data[14])
+                    if val < 99.0: 
+                        return (val * 9/5) + 32
+    except: 
+        pass
     return None
 
 def fetch_data():
@@ -136,7 +144,9 @@ with st.form("logger_form", clear_on_submit=True):
     o_s = st.selectbox("Observed Surf", ["Flat / Glassy", "Minor Ripples (<1 ft)", "Chop (1-2 ft)", "Heavy Waves (3+ ft)"])
     o_f = st.select_slider("Observed Fly Severity", options=["None 😊", "Minor 🟡", "Severe 🔴"])
     o_n = st.text_input("Additional Ground Notes")
-    if st.form_submit_with_button("💾 Save Field Observation Record"):
+    
+    # Precise, canonical Streamlit submit function deployment
+    if st.form_submit_button("💾 Save Field Observation Record"):
         row = pd.DataFrame([{"Time": datetime.now().strftime("%m-%d %H:%M"), "M_Water": water_temp, "O_Water": o_w, "M_Wind": f"{wind_speed:.1f} {get_compass(wind_dir)}", "O_Surf": o_s, "Flies": o_f, "Notes": o_n}])
         row.to_csv("observations.csv", mode='a', header=not os.path.exists("observations.csv"), index=False)
         st.success("Saved! Log records appended to observations.csv inside GitHub repo.")
