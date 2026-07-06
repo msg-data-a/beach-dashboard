@@ -65,8 +65,7 @@ def estimate_fly_risk(wind_speed_mph, wind_dir_deg):
 # ----------------------------------------------------
 @st.cache_data(ttl=900)
 def fetch_all_beach_data():
-    # Use standard forecast endpoint with explicit dictionary mapping to bypass hosting server limits
-    weather_url = "https://api.open-meteo.com/v1/forecast"
+    weather_url = "https://open-meteo.com"
     query_params = {
         "latitude": LAT,
         "longitude": LON,
@@ -84,7 +83,7 @@ def fetch_all_beach_data():
     wind_mph = res['hourly']['wind_speed_10m'][curr_hour] * 0.621371
     wind_dir = res['hourly']['wind_direction_10m'][curr_hour]
     
-    # Algorithmic seasonal baseline wave height (calculated directly from wind energy proxy)
+    # Algorithmic seasonal baseline wave height
     wave_ft = 0.5
     if wind_mph > 15:
         wave_ft = (wind_mph * 0.15) if (60 <= wind_dir <= 160) else (wind_mph * 0.08)
@@ -108,7 +107,7 @@ try:
     fly_lbl, fly_desc = estimate_fly_risk(wind_speed, wind_dir)
 
     st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
-    st.caption(f"Text-Based Hydrodynamic Model Dashboard — Coordinates: {LAT}, {LON}")
+    st.caption(f"Hydrodynamic Model Dashboard — Coordinates: {LAT}, {LON}")
     st.markdown("---")
 
     # Column Widgets for Metrics
@@ -142,5 +141,7 @@ except Exception as e:
 
 st.markdown("---")
 st.subheader("🛰️ NOAA Great Lakes Surface Environmental Analysis (GLSEA)")
-noaa_image_url = "https://noaa.gov"
-st.image(noaa_image_url, caption="Official Daily NOAA Lake Michigan Heat Gradient Map Loop", use_container_width=True)
+st.info("📊 **NOAA Temperature Mapping:** Tap the button below to view the official satellite thermal heat gradient analysis map directly from NOAA's tracking servers.")
+
+# Direct navigation link to bypass host server embed tracking bans
+st.link_button("🗺️ Open Live NOAA Lake Michigan Heat Map", "https://noaa.gov")
