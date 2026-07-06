@@ -78,11 +78,11 @@ def estimate_fly_risk(wind_speed_mph, wind_dir_deg):
 # ----------------------------------------------------
 # 2. Data Fetching API Pipeline
 # ----------------------------------------------------
-@st.cache_data(ttl=900) # Cache data for 15 minutes to save API limits
+@st.cache_data(ttl=900)
 def fetch_all_beach_data():
-    marine_url = f"https://open-meteo.com{LAT}&longitude={LON}&hourly=wave_height,wave_period,wave_direction&daily=sea_surface_temperature&timezone=auto&forecast_days=1"
-    weather_url = f"https://open-meteo.com{LAT}&longitude={LON}&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m&timezone=auto&forecast_days=1"
-
+    # Hardcoded, direct URLs to prevent string formatting syntax errors
+    marine_url = "https://open-meteo.com"
+    weather_url = "https://open-meteo.com"
     
     m_res = requests.get(marine_url).json()
     w_res = requests.get(weather_url).json()
@@ -98,7 +98,7 @@ def fetch_all_beach_data():
     wave_ft = m_res['hourly']['wave_height'][curr_hour] * 3.28084
     wave_period = m_res['hourly']['wave_period'][curr_hour]
     
-    sst_c = m_res['daily']['sea_surface_temperature'][0]
+    sst_c = m_res['daily']['sea_surface_temperature'][0]  # Grab the first day's value explicitly
     sst_f = (sst_c * 9/5) + 32
     
     # Account for nearshore upwelling adjustments in water temp
@@ -106,6 +106,7 @@ def fetch_all_beach_data():
         sst_f -= 4.5  # Heavy nearshore upwelling drop
         
     return air_temp_f, humidity, wind_mph, wind_dir, wave_ft, wave_period, sst_f
+
 
 # ----------------------------------------------------
 # 3. UI Dashboard Rendering
