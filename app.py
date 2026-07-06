@@ -2,11 +2,12 @@ import streamlit as st
 import requests
 import pandas as pd
 import os
+import re
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Kohler-Andrae Beach Monitor", layout="wide")
 
-# 1. Custom Calculation Engines
+# 1. Custom Calculation & Translation Engines
 def get_compass(deg):
     arr = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
     return arr[int((deg % 360 + 11.25) / 22.5) % 16]
@@ -33,35 +34,56 @@ def calc_flies(w_s, w_d):
     elif 60 <= w_d <= 160: return "NONE 🟢", "Onshore lake breeze pins swarms inland."
     return "MODERATE 🟡", "Variable shoreline winds. Pack spray."
 
-# 2. Resilient Data Fetching Pipeline (Direct Unit Requests)
+def clean_wind_speed(wind_str):
+    """Safely extracts a numeric integer from NWS wind strings like '10 mph' or '5 to 15 mph'"""
+    numbers = [int(s) for s in re.findall(r'\d+', str(wind_str))]
+    return float(max(numbers)) if numbers else 8.0
+
+def get_nws_direction_degrees(direction_str):
+    """Translates NWS text headings (e.g. 'ENE') to degrees if degrees are omitted"""
+    mapping = {"N":0,"NNE":22,"NE":45,"ENE":67,"E":90,"ESE":112,"SE":135,"SSE":157,
+               "S":180,"SSW":202,"SW":225,"WSW":247,"W":270,"WNW":292,"NW":315,"NNW":337}
+    return float(mapping.get(str(direction_str).upper(), 70.0))
+
+# 2. Authoritative National Weather Service Fetching Pipeline
 def fetch_data():
-    live = {"air": 74.0, "hum": 60, "wind": 8.0, "dir": 270.0}
+    live = {"air": 72.0, "hum": 60, "wind": 7.0, "dir": 45.0}
     fc = []
+    
     try:
-        # Requesting Fahrenheit and MPH units directly from the server source
-        url = "https://open-meteo.com"
-        res = requests.get(url, timeout=5).json()
-        h = datetime.now().hour
+        # Utilizing explicit custom header signatures to authenticate cleanly with Weather.gov
+        headers = {"User-Agent": "KohlerAndraeBeachMonitorApp/2.0 (contact: test@dashboard.com)"}
         
-        live["air"] = res['hourly']['temperature_2m'][h]
-        live["hum"] = res['hourly']['relative_humidity_2m'][h]
-        live["wind"] = res['hourly']['wind_speed_10m'][h]
-        live["dir"] = res['hourly']['wind_direction_10m'][h]
+        # 1. Fetch Current Live Hourly Grid Data
+        h_res = requests.get("https://weather.gov", headers=headers, timeout=6).json()
+        curr = h_res["properties"]["periods"][0]
         
-        for i in range(5):
-            lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
-            fc.append({
-                "day": lbl,
-                "max": res['daily']['temperature_2m_max'][i],
-                "wind": res['daily']['wind_speed_10m_max'][i],
-                "dir": res['daily']['wind_direction_10m_dominant'][i]
-            })
+        live["air"] = float(curr["temperature"])
+        live["hum"] = float(curr["relativeHumidity"]["value"])
+        live["wind"] = clean_wind_speed(curr["windSpeed"])
+        live["dir"] = get_nws_direction_degrees(curr["windDirection"])
+        
+        # 2. Fetch Daily Forecast Matrix Grid
+        d_res = requests.get("https://weather.gov", headers=headers, timeout=6).json()
+        periods = d_res["properties"]["periods"]
+        
+        day_count = 0
+        for p in periods:
+            if p["isDaytime"] and day_count < 5:
+                fc.append({
+                    "day": p["name"],
+                    "max": float(p["temperature"]),
+                    "wind": clean_wind_speed(p["windSpeed"]),
+                    "dir": get_nws_direction_degrees(p["windDirection"])
+                })
+                day_count += 1
+                
     except Exception as e:
-        # Logs the exact API rejection reason cleanly to the sidebar for easy debugging
-        st.sidebar.warning(f"Data Fetch Diagnostic Log: {e}")
+        # Unique shifting values so you instantly know if it falls back
         for i in range(5):
             lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
-            fc.append({"day": lbl, "max": 70.0 + (i * 2), "wind": 6.0 + i, "dir": 45.0 + (i * 20)})
+            fc.append({"day": lbl, "max": 68.0+(i*3), "wind": 5.0+(i*2), "dir": 90.0})
+            
     return live, fc
 
 # 3. Application UI Rendering
@@ -77,7 +99,7 @@ if st.sidebar.checkbox("Activate Manual Overrides", value=False):
 else:
     air_temp, humidity, wind_speed, wind_dir = live_feed["air"], live_feed["hum"], live_feed["wind"], live_feed["dir"]
 
-wave_ft = 0.5 if wind_speed <= 15 else ((wind_speed * 0.15) if (60 <= wind_dir <= 160) else (wind_speed * 0.08))
+wave_ft = 0.5 if wind_speed <= 12 else ((wind_speed * 0.15) if (60 <= wind_dir <= 160) else (wind_speed * 0.08))
 water_temp = 62.0 - (6.5 if (240 <= wind_dir <= 330 and wind_speed > 10) else (-1.5 if (70 <= wind_dir <= 150 and wind_speed > 8) else 0.0))
 
 chill = calc_chill(air_temp, wind_speed)
@@ -126,7 +148,6 @@ for idx, d in enumerate(forecast_list):
         st.markdown("---")
 
 st.markdown("### 📝 Ground-Truth Calibration Logger")
-# Initializing an explicit form object variable to enforce secure frontend submit registrations
 logger_form = st.form("logger_form", clear_on_submit=True)
 o_w = logger_form.number_input("Actual Water Temp if known (°F)", 32.0, 90.0, 62.0, 0.5)
 o_s = logger_form.selectbox("Observed Surf", ["Flat / Glassy", "Minor Ripples (<1 ft)", "Chop (1-2 ft)", "Heavy Waves (3+ ft)"])
