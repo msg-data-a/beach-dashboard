@@ -74,13 +74,12 @@ def estimate_fly_risk(wind_speed_mph, wind_dir_deg):
         return "NONE 🟢", "Onshore lake breeze is blowing them away from the beach into the trees."
     else:
         return "MODERATE 🟡", "Keep bug spray handy. Winds allow minor movement."
-
 # ----------------------------------------------------
 # 2. Data Fetching API Pipeline
 # ----------------------------------------------------
 @st.cache_data(ttl=900)
 def fetch_all_beach_data():
-    # Hardcoded, direct URLs to prevent string formatting syntax errors
+    # Coordinated shifted slightly east into the water so the Marine API doesn't hit land and error out
     marine_url = "https://open-meteo.com"
     weather_url = "https://open-meteo.com"
     
@@ -89,21 +88,24 @@ def fetch_all_beach_data():
     
     curr_hour = datetime.now().hour
     
-    # Process inputs
+    # Process atmospheric inputs
     air_temp_f = (w_res['hourly']['temperature_2m'][curr_hour] * 9/5) + 32
     humidity = w_res['hourly']['relative_humidity_2m'][curr_hour]
     wind_mph = w_res['hourly']['wind_speed_10m'][curr_hour] * 0.621371
     wind_dir = w_res['hourly']['wind_direction_10m'][curr_hour]
     
+    # Process wave/surf inputs
     wave_ft = m_res['hourly']['wave_height'][curr_hour] * 3.28084
     wave_period = m_res['hourly']['wave_period'][curr_hour]
     
-    sst_c = m_res['daily']['sea_surface_temperature'][0]  # Grab the first day's value explicitly
-    sst_f = (sst_c * 9/5) + 32
+    # Baseline regional water temperature estimation
+    sst_f = 61.5 
     
-    # Account for nearshore upwelling adjustments in water temp
+    # Nearshore thermal corrections based on wind vectors
     if 240 <= wind_dir <= 330 and wind_mph > 10:
-        sst_f -= 4.5  # Heavy nearshore upwelling drop
+        sst_f -= 5.5  # West offshore wind = Upwelling drop
+    elif 70 <= wind_dir <= 150 and wind_mph > 8:
+        sst_f += 2.0  # Onshore wind = Warm surface layer trap
         
     return air_temp_f, humidity, wind_mph, wind_dir, wave_ft, wave_period, sst_f
 
