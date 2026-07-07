@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Kohler-Andrae Beach Monitor", layout="wide")
+st.set_page_config(page_title="Draayers Ct Beach Monitor", layout="wide")
 
 # 1. Custom Calculation & Translation Engines
 def get_compass(deg):
