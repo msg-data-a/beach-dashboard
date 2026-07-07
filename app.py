@@ -49,12 +49,12 @@ def fetch_data():
     live = {"air": 72.0, "hum": 60, "wind": 7.0, "dir": 45.0}
     fc = []
     error_msg = None
+    grid_info = "Unknown Grid"
     
     try:
-        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/4.0 (contact: info@beachdashboard.com)"}
+        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/4.5 (contact: info@beachdashboard.com)"}
         
         # Step A: Resolve Lat/Long into the correct land grid endpoints dynamically
-        # Coordinates sit inside the park boundary safely on land
         points_url = "https://api.weather.gov/points/43.6728,-87.7193"
         p_req = requests.get(points_url, headers=headers, timeout=10)
         
@@ -62,10 +62,16 @@ def fetch_data():
             raise Exception(f"Points API returned Status {p_req.status_code}: {p_req.text[:150]}")
             
         p_res = p_req.json()
+        props = p_res["properties"]
         
-        # Pull dynamic urls directly from the NWS metadata resolver
-        hourly_url = p_res["properties"]["forecastHourly"]
-        daily_url = p_res["properties"]["forecast"]
+        # Extract dynamic grid details for auditing
+        grid_id = props.get("gridId", "UNKNOWN")
+        grid_x = props.get("gridX", "?")
+        grid_y = props.get("gridY", "?")
+        grid_info = f"{grid_id} (Grid X: {grid_x}, Y: {grid_y})"
+        
+        hourly_url = props["forecastHourly"]
+        daily_url = props["forecast"]
         
         # Step B: Fetch Dynamic Hourly Data
         h_req = requests.get(hourly_url, headers=headers, timeout=10)
@@ -100,17 +106,20 @@ def fetch_data():
                 
     except Exception as e:
         error_msg = str(e)
+        grid_info = "Fallback Cache Grid"
         fc = []
         for i in range(5):
             lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
             fc.append({"day": lbl, "max": 68.0+(i*3), "wind": 5.0+(i*2), "dir": 90.0})
             
-    return live, fc, error_msg
-
+    return live, fc, error_msg, grid_info
 
 # 3. Application UI Rendering
 st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
-live_feed, forecast_list, api_error = fetch_data()
+live_feed, forecast_list, api_error, active_grid = fetch_data()
+
+# Render location and grid provenance directly in a clean sub-header layout
+st.markdown(f"📍 **Target Footprint:** `43.6728° N, 87.7193° W` | 🗺️ **Active NWS Station Boundary:** `{active_grid}`")
 
 st.sidebar.header("🔬 Model Auditing Tool")
 if st.sidebar.checkbox("Activate Manual Overrides", value=False):
@@ -182,7 +191,6 @@ if submit_button:
     row.to_csv("observations.csv", mode='a', header=not os.path.exists("observations.csv"), index=False)
     st.success("Saved! Log records appended to observations.csv inside GitHub repo.")
 
-# Debug text display area
 if api_error:
     st.warning("⚠️ Currently displaying backup/fallback simulation layer.")
     st.error(f"**Diagnostic Logs:** {api_error}")
