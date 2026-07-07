@@ -53,9 +53,8 @@ def fetch_data():
     
     try:
         headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/4.5 (contact: info@beachdashboard.com)"}
-        
+        points_url = "https://api.weather.gov/points/43.595721,-87.768476"
         # Step A: Resolve Lat/Long into the correct land grid endpoints dynamically
-        points_url = "https://api.weather.gov/points/43.6728,-87.7193"
         p_req = requests.get(points_url, headers=headers, timeout=10)
         
         if p_req.status_code != 200:
@@ -119,7 +118,7 @@ st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
 live_feed, forecast_list, api_error, active_grid = fetch_data()
 
 # Render location and grid provenance directly in a clean sub-header layout
-st.markdown(f"📍 **Target Footprint:** `43.6728° N, 87.7193° W` | 🗺️ **Active NWS Station Boundary:** `{active_grid}`")
+st.markdown(f"📍 **Target Footprint:** `43.595721° N, 87.768476° W` | 🗺️ **Active NWS Station Boundary:** `{active_grid}`")
 
 st.sidebar.header("🔬 Model Auditing Tool")
 if st.sidebar.checkbox("Activate Manual Overrides", value=False):
