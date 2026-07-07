@@ -44,45 +44,48 @@ def get_nws_direction_degrees(direction_str):
     return float(mapping.get(str(direction_str).upper(), 70.0))
 
 # 2. Authoritative National Weather Service Fetching Pipeline
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def fetch_data():
     live = {"air": 72.0, "hum": 60, "wind": 7.0, "dir": 45.0}
     fc = []
     error_msg = None
     
     try:
-        # NWS requires an identifiable User-Agent. Using a unique placeholder.
-        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/3.0 (contact: info@beachdashboard.com)"}
-
-        # 1. Fetch Live Hourly Grid Data (Updated to Land Grid 90,72)
-        hourly_url = "https://api.weather.gov/gridpoints/MKX/91,72/forecast/hourly"
-        h_req = requests.get(hourly_url, headers=headers, timeout=10)
+        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/4.0 (contact: info@beachdashboard.com)"}
         
+        # Step A: Resolve Lat/Long into the correct land grid endpoints dynamically
+        # Coordinates sit inside the park boundary safely on land
+        points_url = "https://api.weather.gov/points/43.6728,-87.7193"
+        p_req = requests.get(points_url, headers=headers, timeout=10)
+        
+        if p_req.status_code != 200:
+            raise Exception(f"Points API returned Status {p_req.status_code}: {p_req.text[:150]}")
+            
+        p_res = p_req.json()
+        
+        # Pull dynamic urls directly from the NWS metadata resolver
+        hourly_url = p_res["properties"]["forecastHourly"]
+        daily_url = p_res["properties"]["forecast"]
+        
+        # Step B: Fetch Dynamic Hourly Data
+        h_req = requests.get(hourly_url, headers=headers, timeout=10)
         if h_req.status_code != 200:
-            raise Exception(f"Hourly API returned Status {h_req.status_code}: {h_req.text[:200]}")
+            raise Exception(f"Hourly API returned Status {h_req.status_code}: {h_req.text[:150]}")
             
         h_res = h_req.json()
-        if "properties" not in h_res:
-            raise Exception(f"Hourly JSON missing 'properties'. Raw keys: {list(h_res.keys())}")
-            
         curr = h_res["properties"]["periods"][0]
         live["air"] = float(curr.get("temperature", 72.0))
         hum_data = curr.get("relativeHumidity", {})
         live["hum"] = float(hum_data.get("value", 60.0)) if isinstance(hum_data, dict) else 60.0
         live["wind"] = clean_wind_speed(curr.get("windSpeed", "7 mph"))
         live["dir"] = get_nws_direction_degrees(curr.get("windDirection", "NE"))
-
-        # 2. Fetch 5-Day Daily Forecast (Updated to Land Grid 91,72)
-        daily_url = "https://api.weather.gov/gridpoints/MKX/90,72/forecast"
-        d_req = requests.get(daily_url, headers=headers, timeout=10)
         
+        # Step C: Fetch Dynamic 5-Day Daily Forecast
+        d_req = requests.get(daily_url, headers=headers, timeout=10)
         if d_req.status_code != 200:
-            raise Exception(f"Daily API returned Status {d_req.status_code}: {d_req.text[:200]}")
+            raise Exception(f"Daily API returned Status {d_req.status_code}: {d_req.text[:150]}")
             
         d_res = d_req.json()
-        if "properties" not in d_res:
-            raise Exception(f"Daily JSON missing 'properties'. Raw keys: {list(d_res.keys())}")
-            
         periods = d_res["properties"]["periods"]
         day_count = 0
         for p in periods:
@@ -103,6 +106,7 @@ def fetch_data():
             fc.append({"day": lbl, "max": 68.0+(i*3), "wind": 5.0+(i*2), "dir": 90.0})
             
     return live, fc, error_msg
+
 
 # 3. Application UI Rendering
 st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
