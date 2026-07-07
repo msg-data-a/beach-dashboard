@@ -44,35 +44,46 @@ def get_nws_direction_degrees(direction_str):
     return float(mapping.get(str(direction_str).upper(), 70.0))
 
 # 2. Authoritative National Weather Service Fetching Pipeline
-@st.cache_data(ttl=600) # Lowered cache to 10 mins for easier testing
+@st.cache_data(ttl=300)
 def fetch_data():
     live = {"air": 72.0, "hum": 60, "wind": 7.0, "dir": 45.0}
     fc = []
     error_msg = None
     
     try:
-        # Unique User-Agent required by weather.gov API policy
-        headers = {"User-Agent": "KohlerAndraeBeachMonitorApp/2.5 (contact: dev_test@dashboard.com)"}
+        # NWS requires an identifiable User-Agent. Using a unique placeholder.
+        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/3.0 (contact: info@beachdashboard.com)"}
         
         # 1. Fetch Hourly Data
         hourly_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast/hourly"
-        h_res = requests.get(hourly_url, headers=headers, timeout=10).json()
+        h_req = requests.get(hourly_url, headers=headers, timeout=10)
+        
+        if h_req.status_code != 200:
+            raise Exception(f"Hourly API returned Status {h_req.status_code}: {h_req.text[:200]}")
+            
+        h_res = h_req.json()
+        if "properties" not in h_res:
+            raise Exception(f"Hourly JSON missing 'properties'. Raw keys: {list(h_res.keys())}")
+            
         curr = h_res["properties"]["periods"][0]
-        
         live["air"] = float(curr.get("temperature", 72.0))
-        
-        # Safe extraction of nested humidity
         hum_data = curr.get("relativeHumidity", {})
         live["hum"] = float(hum_data.get("value", 60.0)) if isinstance(hum_data, dict) else 60.0
-        
         live["wind"] = clean_wind_speed(curr.get("windSpeed", "7 mph"))
         live["dir"] = get_nws_direction_degrees(curr.get("windDirection", "NE"))
         
         # 2. Fetch 5-Day Daily Forecast
         daily_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast"
-        d_res = requests.get(daily_url, headers=headers, timeout=10).json()
-        periods = d_res["properties"]["periods"]
+        d_req = requests.get(daily_url, headers=headers, timeout=10)
         
+        if d_req.status_code != 200:
+            raise Exception(f"Daily API returned Status {d_req.status_code}: {d_req.text[:200]}")
+            
+        d_res = d_req.json()
+        if "properties" not in d_res:
+            raise Exception(f"Daily JSON missing 'properties'. Raw keys: {list(d_res.keys())}")
+            
+        periods = d_res["properties"]["periods"]
         day_count = 0
         for p in periods:
             if p.get("isDaytime") and day_count < 5:
@@ -167,6 +178,7 @@ if submit_button:
     row.to_csv("observations.csv", mode='a', header=not os.path.exists("observations.csv"), index=False)
     st.success("Saved! Log records appended to observations.csv inside GitHub repo.")
 
-# Debug section at the bottom to catch network-level blockages
+# Debug text display area
 if api_error:
-    st.error(f"⚠️ NWS Pipeline Error Details: {api_error}")
+    st.warning("⚠️ Currently displaying backup/fallback simulation layer.")
+    st.error(f"**Diagnostic Logs:** {api_error}")
