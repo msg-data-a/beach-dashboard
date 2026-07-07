@@ -46,15 +46,16 @@ def get_nws_direction_degrees(direction_str):
     return float(mapping.get(str(direction_str).upper(), 70.0))
 
 # 2. Authoritative National Weather Service Fetching Pipeline
-@st.cache_data(ttl=1800)  # Cache API responses for 30 minutes to reduce network lag
+@st.cache_data(ttl=1800)  # Caches data for 30 minutes to make page loads lightning fast
 def fetch_data():
+    # Base defaults if the API completely fails to connect
     live = {"air": 72.0, "hum": 60, "wind": 7.0, "dir": 45.0}
     fc = []
     
     try:
         headers = {"User-Agent": "KohlerAndraeBeachMonitorApp/2.0 (contact: test@dashboard.com)"}
         
-        # 1. Fetch Current Live Hourly Grid Data for Kohler-Andrae (MKX Grid 91,73)
+        # 1. Fetch Live Hourly Grid Data for Kohler-Andrae region
         hourly_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast/hourly"
         h_res = requests.get(hourly_url, headers=headers, timeout=6).json()
         curr = h_res["properties"]["periods"][0]
@@ -64,7 +65,7 @@ def fetch_data():
         live["wind"] = clean_wind_speed(curr["windSpeed"])
         live["dir"] = get_nws_direction_degrees(curr["windDirection"])
         
-        # 2. Fetch Daily Forecast Matrix Grid
+        # 2. Fetch 5-Day Extended Daily Forecast Grid
         daily_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast"
         d_res = requests.get(daily_url, headers=headers, timeout=6).json()
         periods = d_res["properties"]["periods"]
@@ -81,7 +82,7 @@ def fetch_data():
                 day_count += 1
                 
     except Exception as e:
-        # Fallback dataset if NWS API drops
+        # Fallback generation step if NWS experiences downtime
         fc = []
         for i in range(5):
             lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
