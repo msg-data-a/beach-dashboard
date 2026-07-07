@@ -35,64 +35,67 @@ def calc_flies(w_s, w_d):
     return "MODERATE 🟡", "Variable shoreline winds. Pack spray."
 
 def clean_wind_speed(wind_str):
-    """Safely extracts a numeric integer from NWS wind strings like '10 mph' or '5 to 15 mph'"""
     numbers = [int(s) for s in re.findall(r'\d+', str(wind_str))]
     return float(max(numbers)) if numbers else 8.0
 
 def get_nws_direction_degrees(direction_str):
-    """Translates NWS text headings (e.g. 'ENE') to degrees if degrees are omitted"""
     mapping = {"N":0,"NNE":22,"NE":45,"ENE":67,"E":90,"ESE":112,"SE":135,"SSE":157,
                "S":180,"SSW":202,"SW":225,"WSW":247,"W":270,"WNW":292,"NW":315,"NNW":337}
     return float(mapping.get(str(direction_str).upper(), 70.0))
 
 # 2. Authoritative National Weather Service Fetching Pipeline
-@st.cache_data(ttl=1800)  # Caches data for 30 minutes to make page loads lightning fast
+@st.cache_data(ttl=600) # Lowered cache to 10 mins for easier testing
 def fetch_data():
-    # Base defaults if the API completely fails to connect
     live = {"air": 72.0, "hum": 60, "wind": 7.0, "dir": 45.0}
     fc = []
+    error_msg = None
     
     try:
-        headers = {"User-Agent": "KohlerAndraeBeachMonitorApp/2.0 (contact: test@dashboard.com)"}
+        # Unique User-Agent required by weather.gov API policy
+        headers = {"User-Agent": "KohlerAndraeBeachMonitorApp/2.5 (contact: dev_test@dashboard.com)"}
         
-        # 1. Fetch Live Hourly Grid Data for Kohler-Andrae region
+        # 1. Fetch Hourly Data
         hourly_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast/hourly"
-        h_res = requests.get(hourly_url, headers=headers, timeout=6).json()
+        h_res = requests.get(hourly_url, headers=headers, timeout=10).json()
         curr = h_res["properties"]["periods"][0]
         
-        live["air"] = float(curr["temperature"])
-        live["hum"] = float(curr.get("relativeHumidity", {}).get("value", 60))
-        live["wind"] = clean_wind_speed(curr["windSpeed"])
-        live["dir"] = get_nws_direction_degrees(curr["windDirection"])
+        live["air"] = float(curr.get("temperature", 72.0))
         
-        # 2. Fetch 5-Day Extended Daily Forecast Grid
+        # Safe extraction of nested humidity
+        hum_data = curr.get("relativeHumidity", {})
+        live["hum"] = float(hum_data.get("value", 60.0)) if isinstance(hum_data, dict) else 60.0
+        
+        live["wind"] = clean_wind_speed(curr.get("windSpeed", "7 mph"))
+        live["dir"] = get_nws_direction_degrees(curr.get("windDirection", "NE"))
+        
+        # 2. Fetch 5-Day Daily Forecast
         daily_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast"
-        d_res = requests.get(daily_url, headers=headers, timeout=6).json()
+        d_res = requests.get(daily_url, headers=headers, timeout=10).json()
         periods = d_res["properties"]["periods"]
         
         day_count = 0
         for p in periods:
-            if p["isDaytime"] and day_count < 5:
+            if p.get("isDaytime") and day_count < 5:
                 fc.append({
-                    "day": p["name"],
-                    "max": float(p["temperature"]),
-                    "wind": clean_wind_speed(p["windSpeed"]),
-                    "dir": get_nws_direction_degrees(p["windDirection"])
+                    "day": p.get("name", "Day"),
+                    "max": float(p.get("temperature", 70.0)),
+                    "wind": clean_wind_speed(p.get("windSpeed", "8 mph")),
+                    "dir": get_nws_direction_degrees(p.get("windDirection", "E"))
                 })
                 day_count += 1
                 
     except Exception as e:
-        # Fallback generation step if NWS experiences downtime
+        error_msg = str(e)
         fc = []
         for i in range(5):
             lbl = (datetime.now() + timedelta(days=i)).strftime("%a %b %d")
             fc.append({"day": lbl, "max": 68.0+(i*3), "wind": 5.0+(i*2), "dir": 90.0})
             
-    return live, fc
+    return live, fc, error_msg
 
 # 3. Application UI Rendering
 st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
-live_feed, forecast_list = fetch_data()
+live_feed, forecast_list, api_error = fetch_data()
 
 st.sidebar.header("🔬 Model Auditing Tool")
 if st.sidebar.checkbox("Activate Manual Overrides", value=False):
@@ -163,3 +166,7 @@ if submit_button:
     row = pd.DataFrame([{"Time": datetime.now().strftime("%m-%d %H:%M"), "M_Water": water_temp, "O_Water": o_w, "M_Wind": f"{wind_speed:.1f} {get_compass(wind_dir)}", "O_Surf": o_s, "Flies": o_f, "Notes": o_n}])
     row.to_csv("observations.csv", mode='a', header=not os.path.exists("observations.csv"), index=False)
     st.success("Saved! Log records appended to observations.csv inside GitHub repo.")
+
+# Debug section at the bottom to catch network-level blockages
+if api_error:
+    st.error(f"⚠️ NWS Pipeline Error Details: {api_error}")
