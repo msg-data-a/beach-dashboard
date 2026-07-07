@@ -114,7 +114,7 @@ def fetch_data():
     return live, fc, error_msg, grid_info
 
 # 3. Application UI Rendering
-st.title("🏖️ Kohler-Andrae Beach Monitor & Surf Panel")
+st.title("🏖️ Draayers Ct Beach Monitor")
 live_feed, forecast_list, api_error, active_grid = fetch_data()
 
 # Render location and grid provenance directly in a clean sub-header layout
