@@ -53,9 +53,9 @@ def fetch_data():
     try:
         # NWS requires an identifiable User-Agent. Using a unique placeholder.
         headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/3.0 (contact: info@beachdashboard.com)"}
-        
-        # 1. Fetch Hourly Data
-        hourly_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast/hourly"
+
+        # 1. Fetch Live Hourly Grid Data (Updated to Land Grid 91,72)
+        hourly_url = "https://api.weather.gov/gridpoints/MKX/91,72/forecast/hourly"
         h_req = requests.get(hourly_url, headers=headers, timeout=10)
         
         if h_req.status_code != 200:
@@ -71,9 +71,9 @@ def fetch_data():
         live["hum"] = float(hum_data.get("value", 60.0)) if isinstance(hum_data, dict) else 60.0
         live["wind"] = clean_wind_speed(curr.get("windSpeed", "7 mph"))
         live["dir"] = get_nws_direction_degrees(curr.get("windDirection", "NE"))
-        
-        # 2. Fetch 5-Day Daily Forecast
-        daily_url = "https://api.weather.gov/gridpoints/MKX/91,73/forecast"
+
+        # 2. Fetch 5-Day Daily Forecast (Updated to Land Grid 91,72)
+        daily_url = "https://api.weather.gov/gridpoints/MKX/91,72/forecast"
         d_req = requests.get(daily_url, headers=headers, timeout=10)
         
         if d_req.status_code != 200:
