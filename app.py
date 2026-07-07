@@ -4,8 +4,9 @@ import pandas as pd
 import os
 import re
 from datetime import datetime, timedelta
+from streamlit_gsheets import GSheetsConnection
 
-st.set_page_config(page_title="Draayers Ct Beach Monitor", layout="wide")
+st.set_page_config(page_title="Kohler-Andrae Beach Monitor", layout="wide")
 
 # 1. Custom Calculation & Translation Engines
 def get_compass(deg):
@@ -52,9 +53,10 @@ def fetch_data():
     grid_info = "Unknown Grid"
     
     try:
-        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/4.5 (contact: info@beachdashboard.com)"}
+        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/5.0 (contact: info@beachdashboard.com)"}
+        
+        # Using requested tracking coordinates
         points_url = "https://api.weather.gov/points/43.595721,-87.768476"
-        # Step A: Resolve Lat/Long into the correct land grid endpoints dynamically
         p_req = requests.get(points_url, headers=headers, timeout=10)
         
         if p_req.status_code != 200:
@@ -63,7 +65,6 @@ def fetch_data():
         p_res = p_req.json()
         props = p_res["properties"]
         
-        # Extract dynamic grid details for auditing
         grid_id = props.get("gridId", "UNKNOWN")
         grid_x = props.get("gridX", "?")
         grid_y = props.get("gridY", "?")
@@ -72,7 +73,7 @@ def fetch_data():
         hourly_url = props["forecastHourly"]
         daily_url = props["forecast"]
         
-        # Step B: Fetch Dynamic Hourly Data
+        # Fetch Hourly Data
         h_req = requests.get(hourly_url, headers=headers, timeout=10)
         if h_req.status_code != 200:
             raise Exception(f"Hourly API returned Status {h_req.status_code}: {h_req.text[:150]}")
@@ -85,7 +86,7 @@ def fetch_data():
         live["wind"] = clean_wind_speed(curr.get("windSpeed", "7 mph"))
         live["dir"] = get_nws_direction_degrees(curr.get("windDirection", "NE"))
         
-        # Step C: Fetch Dynamic 5-Day Daily Forecast
+        # Fetch 5-Day Forecast
         d_req = requests.get(daily_url, headers=headers, timeout=10)
         if d_req.status_code != 200:
             raise Exception(f"Daily API returned Status {d_req.status_code}: {d_req.text[:150]}")
@@ -114,10 +115,9 @@ def fetch_data():
     return live, fc, error_msg, grid_info
 
 # 3. Application UI Rendering
-st.title("🏖️ Draayers Ct Beach Monitor")
+st.title("🏖️ Coastal Beach Monitor & Surf Panel")
 live_feed, forecast_list, api_error, active_grid = fetch_data()
 
-# Render location and grid provenance directly in a clean sub-header layout
 st.markdown(f"📍 **Target Footprint:** `43.595721° N, 87.768476° W` | 🗺️ **Active NWS Station Boundary:** `{active_grid}`")
 
 st.sidebar.header("🔬 Model Auditing Tool")
@@ -177,18 +177,43 @@ for idx, d in enumerate(forecast_list):
         st.markdown(f"🪰 **Flies:** `{df_s}`\n\n_{df_r}_")
         st.markdown("---")
 
+# 4. Ground-Truth Calibration Logger (Google Sheets Integration)
 st.markdown("### 📝 Ground-Truth Calibration Logger")
+try:
+    # Instantiate the secure Google Sheets connection
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as config_err:
+    st.error("Google Sheets connection configuration missing. Ensure secrets.toml contains your link.")
+
 logger_form = st.form("logger_form", clear_on_submit=True)
 o_w = logger_form.number_input("Actual Water Temp if known (°F)", 32.0, 90.0, 62.0, 0.5)
 o_s = logger_form.selectbox("Observed Surf", ["Flat / Glassy", "Minor Ripples (<1 ft)", "Chop (1-2 ft)", "Heavy Waves (3+ ft)"])
 o_f = logger_form.select_slider("Observed Fly Severity", options=["None 😊", "Minor 🟡", "Severe 🔴"])
 o_n = logger_form.text_input("Additional Ground Notes")
-submit_button = logger_form.form_submit_button("💾 Save Field Observation Record")
+submit_button = logger_form.form_submit_button("💾 Save Field Observation Record to Cloud")
 
 if submit_button:
-    row = pd.DataFrame([{"Time": datetime.now().strftime("%m-%d %H:%M"), "M_Water": water_temp, "O_Water": o_w, "M_Wind": f"{wind_speed:.1f} {get_compass(wind_dir)}", "O_Surf": o_s, "Flies": o_f, "Notes": o_n}])
-    row.to_csv("observations.csv", mode='a', header=not os.path.exists("observations.csv"), index=False)
-    st.success("Saved! Log records appended to observations.csv inside GitHub repo.")
+    try:
+        # Read existing sheet data safely
+        existing_data = conn.read(ttl=0) # Set time-to-live to 0 to always get newest row data
+        
+        # Compile a row pairing model expectations alongside user observations
+        new_row = pd.DataFrame([{
+            "Time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "Model_Water_Temp": round(water_temp, 1),
+            "Observed_Water_Temp": o_w,
+            "Model_Wind": f"{wind_speed:.1f} mph {get_compass(wind_dir)}",
+            "Observed_Surf": o_s,
+            "Observed_Fly_Severity": o_f,
+            "Notes": o_n
+        }])
+        
+        # Concatenate data and push live update to the cloud spreadsheet
+        updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+        conn.update(data=updated_df)
+        st.success("Successfully logged! Your observation has been sent directly to the Google Sheet.")
+    except Exception as update_err:
+        st.error(f"Failed to log row: {update_err}")
 
 if api_error:
     st.warning("⚠️ Currently displaying backup/fallback simulation layer.")
