@@ -194,11 +194,8 @@ submit_button = logger_form.form_submit_button("💾 Save Field Observation Reco
 
 if submit_button:
     try:
-        # Read existing sheet data safely
-        existing_data = conn.read(ttl=0) # Set time-to-live to 0 to always get newest row data
-        
-        # Compile a row pairing model expectations alongside user observations
-        new_row = pd.DataFrame([{
+        # 1. Compile the observation data into a clean dictionary list
+        row_dict = [{
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "Model_Water_Temp": round(water_temp, 1),
             "Observed_Water_Temp": o_w,
@@ -206,14 +203,30 @@ if submit_button:
             "Observed_Surf": o_s,
             "Observed_Fly_Severity": o_f,
             "Notes": o_n
-        }])
+        }]
+        new_row = pd.DataFrame(row_dict)
         
-        # Concatenate data and push live update to the cloud spreadsheet
-        updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+        # 2. Read existing sheet data safely
+        try:
+            existing_data = conn.read(ttl=0)
+        except Exception:
+            existing_data = pd.DataFrame() # Create empty dataframe fallback if sheet is completely fresh
+            
+        # 3. Handle structure combination safely
+        if existing_data.empty:
+            updated_df = new_row
+        else:
+            # Drop empty columns/rows if Google Sheets passed back formatting artifacts
+            existing_data = existing_data.dropna(how='all')
+            updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+        
+        # 4. Push live update to the cloud spreadsheet
         conn.update(data=updated_df)
-        st.success("Successfully logged! Your observation has been sent directly to the Google Sheet.")
+        st.success("🎉 Successfully logged! Your observation has been sent directly to your Google Sheet.")
+        
     except Exception as update_err:
-        st.error(f"Failed to log row: {update_err}")
+        # Using repr() guarantees that even empty system errors print out a structural description
+        st.error(f"Failed to log row: {repr(update_err)}")
 
 if api_error:
     st.warning("⚠️ Currently displaying backup/fallback simulation layer.")
