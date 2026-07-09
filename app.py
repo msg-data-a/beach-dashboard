@@ -6,9 +6,9 @@ import re
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-st.set_page_config(page_title="Kohler-Andrae Beach Monitor", layout="wide")
+# 1. Page Configuration & Custom Branding
+st.set_page_config(page_title="Draayers Ct Beach Monitor", layout="wide")
 
-# 1. Custom Calculation & Translation Engines
 def get_compass(deg):
     arr = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
     return arr[int((deg % 360 + 11.25) / 22.5) % 16]
@@ -53,9 +53,9 @@ def fetch_data():
     grid_info = "Unknown Grid"
     
     try:
-        headers = {"User-Agent": "KohlerAndraeBeachMonitorDashboard/5.0 (contact: info@beachdashboard.com)"}
+        headers = {"User-Agent": "DraayersCtBeachMonitor/5.5 (contact: info@beachdashboard.com)"}
         
-        # Using requested tracking coordinates
+        # Coordinates for Draayers Ct area setup
         points_url = "https://api.weather.gov/points/43.595721,-87.768476"
         p_req = requests.get(points_url, headers=headers, timeout=10)
         
@@ -115,7 +115,7 @@ def fetch_data():
     return live, fc, error_msg, grid_info
 
 # 3. Application UI Rendering
-st.title("🏖️ Coastal Beach Monitor & Surf Panel")
+st.title("🏖️ Draayers Ct Beach Monitor")
 live_feed, forecast_list, api_error, active_grid = fetch_data()
 
 st.markdown(f"📍 **Target Footprint:** `43.595721° N, 87.768476° W` | 🗺️ **Active NWS Station Boundary:** `{active_grid}`")
@@ -177,55 +177,67 @@ for idx, d in enumerate(forecast_list):
         st.markdown(f"🪰 **Flies:** `{df_s}`\n\n_{df_r}_")
         st.markdown("---")
 
-# 4. Ground-Truth Calibration Logger (Google Sheets Integration)
-st.markdown("### 📝 Ground-Truth Calibration Logger")
+# 4. Observed Conditions Log (Google Sheets Calibration)
+st.markdown("### 📝 Observed Conditions Log")
 try:
-    # Instantiate the secure Google Sheets connection
     conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as config_err:
-    st.error("Google Sheets connection configuration missing. Ensure secrets.toml contains your link.")
+    st.error("Google Sheets connection configuration missing. Check secrets settings.")
 
 logger_form = st.form("logger_form", clear_on_submit=True)
-o_w = logger_form.number_input("Actual Water Temp if known (°F)", 32.0, 90.0, 62.0, 0.5)
-o_s = logger_form.selectbox("Observed Surf", ["Flat / Glassy", "Minor Ripples (<1 ft)", "Chop (1-2 ft)", "Heavy Waves (3+ ft)"])
+
+# Water temperature string box allows blanks if user leaves it default
+o_w_raw = logger_form.text_input("Actual Water Temp if known (°F) [Leave blank if unknown]", value="")
+o_s = logger_form.selectbox("Observed Surf Level", ["Flat / Glassy", "Minor Ripples (<1 ft)", "Chop (1-2 ft)", "Heavy Waves (3+ ft)"])
 o_f = logger_form.select_slider("Observed Fly Severity", options=["None 😊", "Minor 🟡", "Severe 🔴"])
-o_n = logger_form.text_input("Additional Ground Notes")
+o_n = logger_form.text_input("Additional Field Observation Notes")
 submit_button = logger_form.form_submit_button("💾 Save Field Observation Record to Cloud")
 
 if submit_button:
     try:
-        # 1. Compile the observation data into a clean dictionary list
+        # Check string text input to parse out numerical or preserve as unknown string
+        if o_w_raw.strip() == "":
+            final_observed_water = "Unknown"
+        else:
+            # Strip extra spaces or degree symbols out safely
+            clean_val = re.sub(r'[^\d\.]', '', o_w_raw)
+            final_observed_water = float(clean_val) if clean_val else "Unknown"
+
+        # Compile data matching both model data and human validation side-by-side
         row_dict = [{
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "Model_Water_Temp": round(water_temp, 1),
-            "Observed_Water_Temp": o_w,
-            "Model_Wind": f"{wind_speed:.1f} mph {get_compass(wind_dir)}",
+            "Observed_Water_Temp": final_observed_water,
+            "Model_Air_Temp": round(air_temp, 1),
+            "Model_Wind_Speed": round(wind_speed, 1),
+            "Model_Wind_Dir_Deg": int(wind_dir),
+            "Model_Wind_Compass": get_compass(wind_dir),
+            "Model_Humidity": int(humidity),
+            "Model_Wave_Height_Ft": round(wave_ft, 1),
+            "Model_Swim_Score": int(s_score),
+            "Model_Swim_Label": s_lbl,
+            "Model_Fly_Label": f_lbl,
             "Observed_Surf": o_s,
             "Observed_Fly_Severity": o_f,
             "Notes": o_n
         }]
         new_row = pd.DataFrame(row_dict)
         
-        # 2. Read existing sheet data safely
         try:
             existing_data = conn.read(ttl=0)
         except Exception:
-            existing_data = pd.DataFrame() # Create empty dataframe fallback if sheet is completely fresh
+            existing_data = pd.DataFrame()
             
-        # 3. Handle structure combination safely
         if existing_data.empty:
             updated_df = new_row
         else:
-            # Drop empty columns/rows if Google Sheets passed back formatting artifacts
             existing_data = existing_data.dropna(how='all')
             updated_df = pd.concat([existing_data, new_row], ignore_index=True)
         
-        # 4. Push live update to the cloud spreadsheet
         conn.update(data=updated_df)
-        st.success("🎉 Successfully logged! Your observation has been sent directly to your Google Sheet.")
+        st.success("🎉 Observation successfully cataloged! Model snapshots and human metrics sent to Google Sheets.")
         
     except Exception as update_err:
-        # Using repr() guarantees that even empty system errors print out a structural description
         st.error(f"Failed to log row: {repr(update_err)}")
 
 if api_error:
